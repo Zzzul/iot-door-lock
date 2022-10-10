@@ -43,16 +43,13 @@ int sentDoorLog = 0; // variable untuk cek udah insert data pintu terbuka ke API
 int checkAccess = 0;
 
 String listCommand = "/start - Mengaktifkan bot.\n/mode_1 - Jika pintu terbuka akan mengirim pesan secara terus menerus sampai pintu kembali tertutup.\n/mode_2 - Jika pintu terbuka hanya akan mengirim pesan sekali.\n/log - Menampilkan daftar riwayat pintu tertutup & terbuka 10 terakhir.\n/give_access - Memberikan hak akses untuk membuka pintu, hak akses akan dihapus ketika pintu kembali tertutup.\n/remove_access - Mencabut hak akses untuk membuka pintu, dan buzzer akan berbunyi.\n/status - Melihat status perangkat dan mode yang digunakan.\n/ping - Mengecek koneksi perangkat dengan telegram.\n/help - Melihat daftar command yang tersedia.\n";
-
+String userAccess = "";
 String getDoorLog();
 String saveDoorLog(String tipe);
-
-int arrTelegramId[] = {5538911886, 1300489861};
 
 void checkMessage();
 void checkWifiConnection();
 void checkTelegramConnection();
-bool checkTelegramId();
 
 void setup() { // put your setup code here, to run once:
   Serial.begin(9600);
@@ -220,27 +217,13 @@ void checkTelegramConnection() {
   }
 }
 
-bool checkTelegramId(int senderId) {
-  for (int i = 0; i <= 5; i++) {
-    if (arrTelegramId[i] != senderId) {
-      Serial.println("false ID");
-      return false;
-    }
-  }
-  Serial.println("true ID");
-  return true;
-}
-
 void checkMessage() {
 
   TBMessage msg;  //  baca pesan telegram yg terakhir dikirim (object dari CTBot)
 
-  //  kalo yang ngirim orang laen
-  //  switch (checkTelegramId(msg.sender.id)) {
-  //  myBot.sendMessage(msg.sender.id, "Maaf nomer kamu tidak terdaftar dalam sistem!");
-
   if (myBot.getNewMessage(msg)) {
     //    String latestMsg = msg.text;
+   
     if (msg.sender.id == 5538911886 || msg.sender.id == 1300489861) {
       String latestMsg = msg.text;
 
@@ -330,6 +313,14 @@ void checkMessage() {
         //      Serial.print(canAccessDoor);
         //      Serial.println(" <- akses door");
         digitalWrite(relay, LOW);
+        String lastName = "";
+        
+        if(msg.sender.lastName){
+          lastName = msg.sender.lastName;
+        }
+        
+        userAccess = (String) msg.sender.firstName +" "+ lastName +" "+ msg.contact.phoneNumber;
+        Serial.print(userAccess);
 
       } else if (latestMsg == "/remove_access") {
         canAccessDoor = false;
@@ -341,9 +332,16 @@ void checkMessage() {
         digitalWrite(relay, HIGH);
 
       } else if (latestMsg == "/log") {
-
         String logDoor = getDoorLog();
-        myBot.sendMessage(msg.sender.id, logDoor);
+        
+        switch (msg.sender.id == 5538911886) {
+          case true:
+            myBot.sendMessage(msg.sender.id, logDoor);
+            break;
+          default:
+            myBot.sendMessage(msg.sender.id, "Maaf, kamu tidak mempunyai akses untuk melihat riwayat pintu!.");
+            break;
+        }
 
       } else {
 
@@ -384,17 +382,18 @@ String getDoorLog() {
 
       int index = 0;
       String logDoor = "Berikut adalah daftar riwayat pintu tertutup & terbuka 10 terakhir.\n\n";
-      logDoor += "No. |  Pintu Terbuka             |  Pintu Tertutup            | Akses |  Lama Waktu\n";
-      logDoor += "-------------------------------------------------------------------------------\n";
+      logDoor += "No. |  Pintu Terbuka             |  Pintu Tertutup            | Akses |  Lama Waktu  |    User    |\n";
+      logDoor += "---------------------------------------------------------------------------------------------------\n";
       for (JsonObject door : doc["data"].as<JsonArray>()) {
         index++;
         const char* doorOpen = door["open"]; // "14-06-2022 21:20:00", "14-06-2022 20:00:00"
         const char* doorClosed = door["closed"]; // "14-06-2022 21:24:13", "14-06-2022 21:13:21"
         const char* doorInterval = door["interval"]; // "4 menit, 13 detik", "0 hari, ...
         const char* doorAccess = door["access"];
+        const char* username = door["user"];
 
-        logDoor += (String) + index + ".   | " + doorOpen + " | " + doorClosed + " |    " + doorAccess + "    | " +  doorInterval + "\n";
-        logDoor += "-------------------------------------------------------------------------------\n";
+        logDoor += (String) + index + ".   | " + doorOpen + " | " + doorClosed + " |    " + doorAccess + "    | " +  doorInterval + "  | " +  username  +"\n";
+        logDoor += "---------------------------------------------------------------------------------------------------\n";
       }
 
       return logDoor;
@@ -423,7 +422,8 @@ String saveDoorLog(String tipe) {
     http.addHeader("Content-Type", "application/json");
 
     Serial.print("[HTTP] POST...\n");
-    int httpCode = http.POST("{\"type\":\"" + tipe + "\",\"api_token\":\"" + apiToken + "\",\"access\":\"" + canAccessDoor + "\"}");
+    int httpCode = http.POST("{\"type\": \""+ tipe +"\", \"access\": \""+ canAccessDoor +"\", \"api_token\": \""+ apiToken +"\", \"user\": \""+ userAccess +"\"}");
+    Serial.print((String) "{\"type\": \""+ tipe +"\", \"access\": \""+ canAccessDoor +"\", \"api_token\": \""+ apiToken +"\", \"user\": \""+ userAccess +"\"}");
 
     // httpCode will be negative on error
     if (httpCode > 0) {
@@ -432,6 +432,8 @@ String saveDoorLog(String tipe) {
       const String json = http.getString();
       Serial.println("received payload:\n<<");
       Serial.println(json);
+
+      userAccess = "";
 
       return json;
     } else {
